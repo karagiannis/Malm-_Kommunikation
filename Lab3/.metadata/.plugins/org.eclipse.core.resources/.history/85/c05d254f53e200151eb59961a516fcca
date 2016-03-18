@@ -1,0 +1,657 @@
+#include "stm32f4xx_hal.h"
+#include <math.h>
+
+#define STB(x)		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, x)			//A3
+#define CLK(x)		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, x)			//A4
+#define DIO(x)		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, x)			//A5
+#define rDIO		HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0)				//A5
+#define LD2(x)		HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, x); 	//LD2
+#define HIGH		GPIO_PIN_SET
+#define LOW			GPIO_PIN_RESET
+#define CDELAY		udelay(1);
+
+#define DATA		0x40
+#define TESTMODE	0x08
+#define FIXED		0x04
+#define READ		0x02
+
+#define DISPLAY		0x80	//+ intensity
+#define	ON			0x08
+
+#define ADDRESS		0xc0	//+ address
+uint8_t segmentCode[16]={0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71};
+uint8_t transfermode;
+unsigned char Key[4]={0};
+
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+
+void sendbyte(uint8_t data);
+void udelay(volatile unsigned int delay);
+
+void sendInstruction(uint8_t data);
+void sendStartAdress(uint8_t data);
+void sendMultipleData(uint8_t data, int count);
+uint8_t decodeKeyPressJens(uint32_t value);
+uint8_t read4BytesAndDecode();
+uint32_t read4BytesAndDecodeEx();
+uint8_t decodeHexToSevenSegment(uint8_t digit);
+void LightUpLedAtPositionDecodedFromHexValue(uint8_t value);
+void LightUpLedAtPositionDecodedFromBitPattern(uint8_t value);
+void sendValueToSegments(uint8_t value);
+void clearSegmentsAndLEDs();
+void writeHexValueToSegmentAtAdress(uint8_t value, uint8_t position);
+void LightUpLedAtPositionDecodedFromHexValue(uint8_t hexValue);
+void writeIntValueToSegmentAtAdress(uint32_t value, uint8_t startAdress);
+uint32_t read4BytesAndConvertToInt();
+
+int main(void)
+{
+	uint8_t receivedData;
+	uint32_t uReceivedData;
+
+	HAL_Init();
+	SystemClock_Config();
+	MX_GPIO_Init();
+
+	HAL_SuspendTick();
+
+	STB(HIGH);
+	DIO(HIGH);
+	CLK(HIGH);
+	CDELAY;
+
+	clearSegmentsAndLEDs();
+	writeHexValueToSegmentAtAdress(0x00,ADDRESS +12 );
+	writeIntValueToSegmentAtAdress(0x12345678, 0xC0);
+
+//Att göra läsa in och jämföra med känd sträng och använda segmenten och leddarna för
+	//felutskrifter
+/**********************************/
+
+
+	while (1)
+	{
+
+
+
+		uReceivedData = read4BytesAndDecodeEx();
+		//uReceivedData = read4BytesAndConvertToInt();
+		if(uReceivedData > 0){
+			//clearSegmentsAndLEDs();
+			//writeHexValueToSegmentAtAdress(receivedData,ADDRESS +12 );
+			writeIntValueToSegmentAtAdress(uReceivedData, 0xC0);
+		}
+		udelay(5000);
+	}
+
+}
+
+void clearSegmentsAndLEDs(){
+	sendInstruction(0x8F); //Lights up
+	sendInstruction(0x40); //Command, write to chip, chip autoincrements
+	sendStartAdress(0xC0);//Send start adress
+
+		// Sendinging (data,count)
+	sendMultipleData(0x00, 16);
+
+}
+
+void writeHexValueToSegmentAtAdress(uint8_t value, uint8_t adress)
+{
+	//Decoding low nibble to segment display
+		 uint8_t lowMask = 0x0F;
+		 uint8_t lowNibble;
+		 lowNibble= value & lowMask;
+		 lowNibble = decodeHexToSevenSegment(lowNibble);
+
+		//Decoding high nibble to segment display
+		 uint8_t highMask = 0xF0;
+		 uint8_t highNibble;
+		 highNibble= value & highMask;
+		 highNibble = highNibble >> 4 ;
+		 highNibble = decodeHexToSevenSegment(highNibble);
+
+
+
+		 sendInstruction(DATA|FIXED);    //Command, write to chip, chip no autoincrements
+		 sendStartAdress(adress+2);
+		 sendMultipleData(lowNibble, 1); // One byte
+
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress);
+		 sendMultipleData(highNibble, 1);
+
+}
+
+void writeIntValueToSegmentAtAdress(uint32_t value, uint8_t adress)
+{
+	//Decoding first (zero) nibble to segment display
+		 uint32_t firstMask = 0x0F;
+		 uint32_t temp1;
+		 uint8_t firstNibble;
+		 temp1 = value & firstMask;
+		 firstNibble = (uint8_t)temp1;
+		 firstNibble = decodeHexToSevenSegment(firstNibble);
+
+	///Decoding second nibble to segment display
+		 uint32_t secondMask = 0xF0;
+		 uint32_t temp2;
+		 uint8_t secondNibble;
+		 temp2 = value & secondMask;
+		 temp2 = temp2 >> 4;
+		 secondNibble = (uint8_t)temp2;
+		 secondNibble = decodeHexToSevenSegment(secondNibble);
+
+	 ///Decoding third nibble to segment display
+		 uint32_t thirdMask = 0xF00;
+		 uint32_t temp3;
+		 uint8_t thirdNibble;
+		 temp3 = value & thirdMask;
+		 temp3 = temp3 >> 8;
+		 thirdNibble = (uint8_t)temp3;
+		 thirdNibble = decodeHexToSevenSegment(thirdNibble);
+
+	 //Decoding fourth nibble to segment display
+		 uint32_t fourthMask = 0xF000;
+		 uint32_t temp4;
+		 uint8_t fourthNibble;
+		 temp4 = value & fourthMask;
+		 temp4 = temp4 >> 12;
+		 fourthNibble = (uint8_t)temp4;
+		 fourthNibble = decodeHexToSevenSegment(fourthNibble);
+
+	 //Decoding fiftth nibble to segment display
+		 uint32_t fifthMask = 0xF0000;
+		 uint32_t temp5;
+		 uint8_t fifthNibble;
+		 temp5 = value & fifthMask;
+		 temp5 = temp5 >> 16;
+		 fifthNibble = (uint8_t)temp5;
+		 fifthNibble = decodeHexToSevenSegment(fifthNibble);
+
+	 //Decoding sixth nibble to segment display
+		 uint32_t sixthMask = 0xF00000;
+		 uint32_t temp6;
+		 uint8_t sixthNibble;
+		 temp6= value & sixthMask;
+		 temp6 = temp6 >> 20;
+		 sixthNibble = (uint8_t)temp6;
+		 sixthNibble = decodeHexToSevenSegment(sixthNibble);
+
+	 //Decoding seventh nibble to segment display
+		 uint32_t seventhMask = 0xF000000;
+		 uint32_t temp7;
+		 uint8_t seventhNibble;
+		 temp7 = value & seventhMask;
+		 temp7 = temp7 >> 24;
+		 seventhNibble = (uint8_t) temp7;
+		 seventhNibble = decodeHexToSevenSegment(seventhNibble);
+
+	 //Decoding eight nibble to segment display
+		 uint32_t eightMask = 0xF0000000;
+		 uint32_t temp8;
+		 uint8_t eightNibble;
+		 temp8 = value & eightMask;
+		 temp8 = temp8 >> 28;
+		 eightNibble = (uint8_t)temp8;
+		 eightNibble = decodeHexToSevenSegment(eightNibble);
+
+
+		 sendInstruction(DATA|FIXED);    //Command, write to chip, chip no autoincrements
+		 sendStartAdress(adress);
+		 sendMultipleData(eightNibble, 1); // One byte
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+2);
+		 sendMultipleData(seventhNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+4);
+		 sendMultipleData(sixthNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+6);
+		 sendMultipleData(fifthNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+8);
+		 sendMultipleData(fourthNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+10);
+		 sendMultipleData(thirdNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+12);
+		 sendMultipleData(secondNibble, 1);
+
+		 sendInstruction(DATA|FIXED); //No auto increment
+		 sendStartAdress(adress+14);
+		 sendMultipleData(firstNibble, 1);
+}
+
+
+
+
+void udelay(volatile unsigned int delay)
+{
+	delay*=11.206;
+	for (;delay!=0;delay--);
+}
+
+void sendbyte(uint8_t data)
+{
+	uint8_t i;
+  //i = i << 1
+	for(i=0x1;i!=0;i<<=1)
+	{
+		DIO(data & i);
+		CLK(LOW);
+		CDELAY;
+		CLK(HIGH);
+		CDELAY;
+	}
+}
+
+uint8_t decodeKeyPressJens(uint32_t value)
+{
+	return	(value & 0x00000001)<<7  |
+			(value & 0x00000100)>>2  |
+			(value & 0x00010000)>>11 |
+			(value & 0x01000000)>>20 |
+			(value & 0x00000010)>>1  |
+			(value & 0x00001000)>>10 |
+			(value & 0x00100000)>>19 |
+			(value & 0x10000000)>>28;
+}
+
+uint8_t read4BytesAndDecode()
+{
+	int j;
+
+	uint8_t received = 0;
+	uint32_t temp = 0;;
+	GPIO_PinState input;
+	sendInstruction(0x42);//Read
+	DIO(HIGH);
+	CDELAY;
+
+		for(j = 0; j < 32; j++)
+		{
+			CLK(LOW);
+			CDELAY;
+			CLK(HIGH);
+			input = rDIO;
+			if(input == 1){
+				temp = temp | (0x01 << j); //setting the bit at position j
+			}
+			CDELAY;
+		}
+	 STB(HIGH);
+	 received = decodeKeyPressJens(temp);
+	return received;
+}
+
+uint32_t read4BytesAndConvertToInt()
+{
+	int j;
+	uint32_t received = 0;
+	GPIO_PinState input;
+	sendInstruction(0x42);//Read
+	DIO(HIGH);
+	CDELAY;
+
+	for(j = 0; j < 32; j++)
+	{
+		CLK(LOW);
+		CDELAY;
+		CLK(HIGH);
+
+		if(rDIO){
+			received = received | (0x01 << j); //setting the bit at position j
+		}
+		CDELAY;
+		CDELAY;
+	}
+	CLK(LOW);
+	DIO(LOW);
+	STB(HIGH);
+	CLK(HIGH);
+	DIO(HIGH);
+}
+
+void display0(unsigned char dat)
+{
+ unsigned char i;
+ send_command(0x40);
+ send_command(0xc0);
+
+ send_8bit(CODE[dat]);
+ for(i=0;i<15;i++)
+ {
+  send_8bit(0x00);
+ }
+ send_command(0x8C);
+ STB=1;
+}
+void key_process()
+{
+   if(Key[0]!=0x00)
+   {
+   if((Key[0]==0x04)){display0(1);}
+   if((Key[0]==0x02)){display0(2);} //
+   }
+     if(Key[1]!=0x00)
+   {
+    if((Key[1]==0x04)){display0(3);} //
+    if((Key[1]==0x02)){display0(4);} //
+   }
+}
+
+uint32_t read4BytesAndDecodeEx()
+{
+	unsigned char i,j;
+	 sendInstruction(0x42);
+	 DIO(HIGH);
+	 for(j=0;j<4;j++)
+	 {
+		   for(i=0;i<8;i++)
+		   {
+			CLK(LOW);
+			Key[j]=Key[j]>>1;
+			CLK(HIGH);
+			if(DIO)
+			  Key[j]=Key[j]|0x80;
+			CDELAY;
+		   }
+	    CDELAY;
+		CDELAY;
+	  }
+	   CLK(LOW);
+	   DIO(LOW);
+	   STB(HIGH);
+	   CLK(HIGH);
+	   DIO(HIGH);
+}
+
+
+uint8_t decodeHexToSevenSegment(uint8_t digit){
+
+	switch(digit){
+
+	case 0: return 0x3F;
+	case 1: return 0x06;
+	case 2: return 0x5B;
+	case 3: return 0x4F;
+	case 4: return 0x66;
+	case 5: return 0x6D;
+	case 6: return 0x7D;
+	case 7: return 0x07;
+	case 8: return 0x7F;
+	case 9: return 0x6F;
+	case 0x0A: return 0xB7;
+	case 0x0B: return 0xFF;
+	case 0x0C: return 0x39;
+	case 0x0D: return 0xDE;
+	case 0x0E: return 0x79;
+	case 0x0F: return 0x71;
+	default: return 0x00;
+
+
+	}
+}
+void LightUpLedAtPositionDecodedFromHexValue(uint8_t value)
+{
+	double dValue = (double)value;
+	double dI;
+	double dTempValue;
+	int i;
+
+	//No auto-increment
+	sendInstruction(DATA|FIXED);
+
+	//LEDs are on odd adresses
+	uint8_t startAdress = 0xCF;
+	sendStartAdress(startAdress);
+	for(i = 7; i >= 0; i--){
+		dI = (double) i;
+		dTempValue = dValue/pow(2.0,dI);
+		if(dTempValue >= 1.0){
+			sendMultipleData(0xFF,1);
+			dValue = dValue - dTempValue;
+		}else
+		{
+			sendMultipleData(0x00,1);
+		}
+		startAdress -= 2;
+		sendStartAdress(startAdress);
+	}
+
+}
+
+
+void LightUpLedAtPositionDecodedFromBitPattern(uint8_t value)
+{
+	//No auto-increment
+	sendInstruction(DATA|FIXED);
+
+	//LEDs are on odd adresses
+	uint8_t startAdress = 0xCF;
+	sendStartAdress(startAdress);
+	uint8_t i;
+
+		for(i=0x1;i!=0;i<<=1)
+		{
+			if(value & i)
+				sendMultipleData(0xFF,1);
+			else
+				sendMultipleData(0x00,1);
+
+			startAdress -= 2;
+			sendStartAdress(startAdress);
+		}
+
+}
+
+void sendValueToSegments(uint8_t value)
+{
+
+	//Decoding low nibble to segment display
+	 uint8_t lowMask = 0x0F;
+	 uint8_t lowNibble;
+	 lowNibble= value & lowMask;
+	 lowNibble = decodeHexToSevenSegment(lowNibble);
+
+	//Decoding high nibble to segment display
+	 uint8_t highMask = 0xF0;
+	 uint8_t highNibble;
+	 highNibble= value & highMask;
+	 highNibble = decodeHexToSevenSegment(highNibble);
+
+
+
+	//Starting sending real data to the 2 right most segment displays
+	//Command, write to chip, chip no autoincrements
+	sendInstruction(DATA|FIXED);
+
+	//Send start adress
+	sendStartAdress(0xCC);
+	highNibble = 4 >> highNibble;
+	sendMultipleData(highNibble, 1);
+
+	//Command, write to chip, chip no autoincrements
+	sendInstruction(DATA|FIXED);
+	sendStartAdress(0xCE);//Send start adress
+	sendMultipleData(lowNibble, 1);
+
+
+}
+
+
+void sendInstruction(uint8_t data)
+{
+	STB(LOW);
+	CDELAY;
+	sendbyte(data);
+	CDELAY;
+	STB(HIGH);
+	CDELAY;
+}
+
+void sendStartAdress(uint8_t data)
+{
+	STB(LOW);
+	CDELAY;
+	sendbyte(data);
+	CDELAY;
+}
+
+void sendMultipleData(uint8_t data, int count)
+{
+	int i;
+	for(i = 0; i < count; i++)
+			sendbyte(data);
+
+	CDELAY;
+	STB(HIGH);
+	CDELAY;
+}
+
+
+/** System Clock Configuration
+ */
+void SystemClock_Config(void)
+{
+
+	RCC_OscInitTypeDef RCC_OscInitStruct;
+	RCC_ClkInitTypeDef RCC_ClkInitStruct;
+
+	__PWR_CLK_ENABLE();
+
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+	RCC_OscInitStruct.HSICalibrationValue = 16;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+	RCC_OscInitStruct.PLL.PLLM = 8;
+	RCC_OscInitStruct.PLL.PLLN = 100;
+	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+	RCC_OscInitStruct.PLL.PLLQ = 4;
+	HAL_RCC_OscConfig(&RCC_OscInitStruct);
+
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2);
+
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
+
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+
+	/* SysTick_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+}
+
+/** Configure pins as 
+ * Analog
+ * Input
+ * Output
+ * EVENT_OUT
+ * EXTI
+     PA2   ------> USART2_TX
+     PA3   ------> USART2_RX
+ */
+void MX_GPIO_Init(void)
+{
+
+	GPIO_InitTypeDef GPIO_InitStruct;
+
+	/* GPIO Ports Clock Enable */
+	__GPIOC_CLK_ENABLE();
+	__GPIOH_CLK_ENABLE();
+	__GPIOA_CLK_ENABLE();
+	__GPIOB_CLK_ENABLE();
+
+	/*Configure GPIO pin : B1_Pin */
+	GPIO_InitStruct.Pin = B1_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : PC0 */
+	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : PC1 */
+	GPIO_InitStruct.Pin = GPIO_PIN_1;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	/*Configure GPIO pins : USART_TX_Pin USART_RX_Pin */
+	GPIO_InitStruct.Pin = USART_TX_Pin|USART_RX_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : LD2_Pin */
+	GPIO_InitStruct.Pin = LD2_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+	HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : PB0 */
+	GPIO_InitStruct.Pin = GPIO_PIN_0;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+}
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+#ifdef USE_FULL_ASSERT
+
+/**
+ * @brief Reports the name of the source file and the source line number
+ * where the assert_param error has occurred.
+ * @param file: pointer to the source file name
+ * @param line: assert_param error line source number
+ * @retval None
+ */
+void assert_failed(uint8_t* file, uint32_t line)
+{
+	/* USER CODE BEGIN 6 */
+	/* User can add his own implementation to report the file name and line number,
+    ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+	/* USER CODE END 6 */
+
+}
+
+#endif
+
+/**
+ * @}
+ */
+
+/**
+ * @}
+ */
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
