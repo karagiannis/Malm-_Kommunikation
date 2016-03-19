@@ -1,8 +1,17 @@
+/*============================================================================
+Name:          main.c
+Author:        Lasse Karagiannis
+Compile with:  Atollic TrueSTUDIO® for ARM®, Built on Eclipse.
+			   Version: 5.4.0 Build id: 20151109-1237
+Date:          2016-03-18
+Description:   Lab4 The program reads the buttons on the TM1638 chip
+                LED & Key Evaluation board
+======================================================================================*/
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx_hal.h"
 #include "cmsis_os.h"
-
+#include <stdio.h>
 #include <math.h>
 
 #define STB(x)		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, x)			//A3
@@ -87,7 +96,7 @@ int main(void)
   	CDELAY;
 
   	clearSegmentsAndLEDs();
-  	writeHexValueToSegmentAtAdress(0x00,ADDRESS +12 );
+  	//writeHexValueToSegmentAtAdress(0x00,ADDRESS +12 );
   	writeIntValueToSegments(0x12345678);
 
 
@@ -103,7 +112,7 @@ int main(void)
   		   writeHexValueToSegmentAtAdress(received, 0xC0);
 
   		}
-  		HAL_UART_Transmit(&huart2,transmit,sizeof(transmit)-1,HAL_MAX_DELAY);
+  		//HAL_UART_Transmit(&huart2,transmit,sizeof(transmit)-1,HAL_MAX_DELAY);
   		udelay(5000);
   	}
 }
@@ -154,7 +163,7 @@ void clearSegmentsAndLEDs(void){
 
 void writeHexValueToSegmentAtAdress(uint8_t value, uint8_t adress)
 {
-
+		uint8_t data;
 	//Decoding low nibble to segment display
 		 uint8_t lowMask = 0x0F;
 		 uint8_t lowNibble;
@@ -179,6 +188,25 @@ void writeHexValueToSegmentAtAdress(uint8_t value, uint8_t adress)
 		 sendStartAdress(adress);
 		 sendMultipleData(highNibble, 1);
 
+		 data = value;
+		 switch(data)
+		 {
+		 case 16:
+			 HAL_UART_Transmit(&huart2,"16_",sizeof("16_"),HAL_MAX_DELAY);
+			 break;
+		 case 32:
+			 HAL_UART_Transmit(&huart2,"32_",sizeof("32_"),HAL_MAX_DELAY);
+			 break;
+		 case 64:
+			 HAL_UART_Transmit(&huart2,"64_",sizeof("64_"),HAL_MAX_DELAY);
+			 break;
+		 case 128:
+			 HAL_UART_Transmit(&huart2,"128_",sizeof("128_"),HAL_MAX_DELAY);
+			 break;
+		 default:
+			 data += 0x30;
+			 HAL_UART_Transmit(&huart2,&data,sizeof(data),HAL_MAX_DELAY);
+		 }
 
 }
 

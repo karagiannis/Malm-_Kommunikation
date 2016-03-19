@@ -4952,3 +4952,6 @@ org.eclipse.core.internal.resources.ResourceException: The resource tree is lock
 
 !ENTRY org.eclipse.cdt.core 1 0 2016-03-18 02:43:50.126
 !MESSAGE Indexed 'lab3 configuration' (0 sources, 0 headers) in 0.00 sec: 0 declarations; 0 references; 0 unresolved inclusions; 0 syntax errors; 0 unresolved names (0.00%)
+
+!ENTRY com.atollic.truestudio.productmanager 1 0 2016-03-18 07:18:53.073
+!MESSAGE Unloading product manager
