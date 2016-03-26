@@ -1,0 +1,26 @@
+/*
+ * util.h
+ *
+ *  Created on: Mar 26, 2016
+ *      Author: Lasse
+ */
+
+#ifndef UTIL_H_
+#define UTIL_H_
+
+
+void udelay(volatile unsigned int delay);
+void sendbyte(uint8_t data);
+void udelay(volatile unsigned int delay);
+
+void sendInstruction(uint8_t data);
+void sendInstructionRead();
+void sendStartAdress(uint8_t data);
+void sendMultipleData(uint8_t data, int count);
+uint8_t decodeHexToSevenSegment(uint8_t digit);
+void clearSegmentsAndLEDs(void);
+void writeHexValueToSegmentAtAdress(uint8_t value, uint8_t position);
+void writeIntValueToSegments(uint32_t value);
+
+
+#endif /* UTIL_H_ */
